@@ -1,17 +1,10 @@
 //gon have to implement a postgres db model
 //mans used Redis
-const {Pool} = require("pg");
+const pool = require(__dirname + "/PoolObj.js");
 const pathToSequencerModule = __dirname + "/../my_modules/Sequencer.js";
 const Sequencer = require(pathToSequencerModule);
 
 const Seq = new Sequencer();
-
-const pool = new Pool({
-	'user': 'the_man_prvnce',
-	'host': 'localhost',
-	'port': 5432,
-	'database': 'shoutbox'
-});
 
 let conn;
 Seq.use(/*creating client*/(next) => {
@@ -85,18 +78,36 @@ Seq.use(/*create class only after table creation success*/(next) => {
 		
 		static getRange(from, to, cb) {
 			const entries = [];
-			const query = `SELECT * FROM entries WHERE id BETWEEN $1 AND $2;`;
-			TheClass.connRef.query(query, [from, to], (err, res) => {
-				if(err) {
-					cb(err);
-					return;
+			const newToProm /*new "to" value*/ = new Promise((resolve, reject) => {
+				if(to === -1) {
+					TheClass.connRef.query('SELECT count(*) FROM entries;', (err, result) => {
+						if(err) {
+							reject(err);
+							return;
+						}
+						
+						resolve(parseInt(result.rows[0]["count"]));
+					});
+				} else {
+					resolve(to);
 				}
-				
-				for(let kini of res.rows)
-					entries.push(kini["entry"]);
-				
-				cb(null, entries);
 			});
+			
+			newToProm.then(newTo => {
+				const query = `SELECT * FROM entries WHERE id BETWEEN $1 AND $2;`;
+				TheClass.connRef.query(query, [from, newTo], (err, res) => {
+					if(err) {
+						cb(err);
+						return;
+					}
+					
+					for(let kini of res.rows)
+						entries.push(kini["entry"]);
+					
+					cb(null, entries);
+				});	
+			});
+			
 		}
 		
 		static endAll() { /*added this one myself for closing connections and rolling back*/
@@ -108,7 +119,6 @@ Seq.use(/*create class only after table creation success*/(next) => {
 				}
 				
 				conn.end();
-				pool.end();
 			});
 		}
 		

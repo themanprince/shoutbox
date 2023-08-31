@@ -13,6 +13,7 @@ const STATIC_DIR /*for static files*/ = __dirname + "/public";
 
 //had to put this import in a seq... so that I'll know that for rest of app to work, it must've been imported
 function importModel(next, req, res) {
+	/*after first require, it will be cached, so no need to worry bout requiring on every request*/
 	require("./models/entry.js").then(theClass => {
 		Entry = theClass;
 		
@@ -110,21 +111,67 @@ function getPost(next, req, res) {
 	next(req, res);
 }
 
+function prePostVal(next, req, res) {
+	/*Pre-Post /post validation*/
+	if((req.method === "POST") && (req.url === "/post")) {
+		let {title, body} = req.body.entry;
+		if((!title) || (title.length < 4)) {
+			res.writeHead(404, {"Content-Type": "text/html"});
+			res.write('<b style="background-color: red; inline-size: 100%">Title cannot be less than 4 chars in length</b>');
+			res.end();
+			return; //certainly abused... lol	
+		}
+		
+		next(req, res); //got here means that it's valid so it can go forward to next middleware
+		return;
+	}
+	
+	next(req, res);
+}
+
 //the callback for post /post requests
 function postPost(next, req, res) {
 	if((req.method === "POST") && (req.url === "/post")) {
-		const {title, body} = req.body; //finna be parsed by formDataParser
+		const {title, body} = req.body.entry; //finna be parsed by formDataParser
 		const entry = new Entry({title, body});
-		entry.save((err, res) => {
+		entry.save((err, result) => {
 			if(err) {
 				console.log("Error in saving entry");
 				console.error(err);
 				return; //there was something below to not go to before... in the begi...
 			}
 			
+			res.writeHead(301, {"Location": "/"}); //TODO - this route
+			res.end();
 		});
 		
 		return; //dont go further down
+	}
+	
+	next(req, res);
+}
+
+function getHome(next, req, res) { /*the home page is a list of entries*/
+	if((req.method === "GET") && (req.url === "/")) {
+		Entry.getRange(1, -1, (err, result) => {
+			if(err) {
+				console.error(err);
+				return;
+			}
+			
+			
+			const hbsObj = {
+				"title": "Entries",
+				"entries": result
+			};
+			//reading the handlebars file
+			includeAndCompile(__dirname + "/view/entries.hbs", hbsObj).then(str => {
+				res.writeHead(200, {"Content-Type": "text/html"});
+				res.end(str);
+			});
+		});
+		
+		return; //stay back... I feel Im abusing this
 	}
 	
 	next(req, res);
@@ -138,10 +185,16 @@ const app = new Server((req, res) => {
 	Seq.use(JSONparser);
 	Seq.use(formDataParser);
 	Seq.use(getPost);
+	Seq.use(prePostVal);
 	Seq.use(postPost);
+	Seq.use(getHome);
 	
 	Seq.next(req, res);
 	//starting with static serve so I gotta lass it the dir
 });
 
 app.listen(PORT, () => console.log("Idan is active"));
+app.on("close", () => {
+	Entry.endAll();
+});
+app.on("SIGNINT", () => app.close());
