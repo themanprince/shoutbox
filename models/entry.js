@@ -67,8 +67,9 @@ Seq.use(/*create class only after table creation success*/(next) => {
 		constructor(obj) {
 			this.#store = {};
 			
-			for(let key of Object.keys(obj))
-				this.#store[key] = obj[key];
+			if(obj)
+				for(let key of Object.keys(obj))
+					this.#store[key] = obj[key];
 		}
 		
 		save(cb) {

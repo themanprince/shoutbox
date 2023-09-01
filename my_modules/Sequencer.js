@@ -19,10 +19,8 @@ class Sequencer {
 	
 	next = (...passables/*to be passed to next func*/) => {
 		
-		if(this.#index >= this.#queue.length) {
-			this.#index = 0;
+		if(this.#index >= this.#queue.length)
 			return;
-		}
 		
 		this.#queue[this.#index++](this.next, ...passables);
 	}
