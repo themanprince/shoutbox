@@ -60,6 +60,7 @@ function staticServe(next, req, res) {
 	allowedMIME.set("js", "application/js");
 	allowedMIME.set("woff2", "font/woff2");
 	allowedMIME.set("svg", "image/svg+xml");
+	allowedMIME.set("ico", "image/icon"); /*this particular one could be rubbish, but kiwi browser won't lemme be without constantly asking for favicon.ico*/
 	
 	const regexStr = `\\/.+\\.(${[...allowedMIME.keys()].join("|")})$`;
 	const regex = new RegExp(regexStr, 'i');
@@ -121,6 +122,22 @@ function sessionHandler(next, req, res) {
 	next(req, res);
 }
 
+//user loader middleware
+function userLoader(next, req, res) {
+	const {uid} = req.session; //if you logged in or registered, you finna have this
+	if(!uid)
+		return next(req, res); //just returning early, like no school
+	
+	User.getUser(uid, (err, kini) => {
+		if(err)
+			return console.error(err);
+		
+		req.user = kini;
+		
+		next(req, res);
+	});
+}
+
 //JSON parser middleware
 function JSONparser(next, req, res) {
 	//only attach handler if content type is JSON
@@ -164,12 +181,118 @@ function formDataParser(next, req, res) {
 	}
 }
 
+//the callback for get registration page requests... express style
+function getRegister(next, req, res) {
+	if((req.method === "GET") && (req.url === "/register")) {
+		//user details for hbs template
+		const user = (req.user) ? req.user : null;
+		//reading the handlebars file
+		includeAndCompile(__dirname + "/view/register.hbs", {"title": "Register", user, ...req.session}).then(str => {
+			res.writeHead(200, {"Content-Type": "text/html"});
+			res.end(str);
+		});
+		return; //preventing further movement
+	}
+	
+	next(req, res);
+}
+
+//for handling registration submissions
+function postRegister(next, req, res) {
+	if((req.method === "POST") && (req.url === "/register")) {
+		//got here means form data finna been parsed so...
+		const data = req.body.user;
+		User.getByName(data.name, (err, user) => {
+			if(err)
+				return console.error(err);
+			
+			if(user.id) {
+				addMsg(req, "Username Taken Bitch", "error");
+				const backURL = req.headers.referrer || "/register";
+				res.writeHead(301, {"Location":backURL});
+				res.end();
+			} else {
+				user = new User({
+					"name": data.name,
+					"pass": data.pass
+				});
+				
+				user.save(err => {
+					if(err)
+						return console.error(err);
+					
+					req.session.uid = user.store.id;
+					res.writeHead(301, {"Location": "/"});
+					res.end();
+				});
+			}
+		});
+	} else {
+		next(req, res);
+	}
+}
+
+function getLogin(next, req, res) {
+	if((req.method === "GET") && (req.url === "/login")) {
+		//user data we gon be passing to hbs template
+		const user = (req.user) ? req.user : null;
+		//reading the handlebars file
+		includeAndCompile(__dirname + "/view/login.hbs", {"title": "Login", user, ...req.session}).then(str => {
+			res.writeHead(200, {"Content-Type": "text/html"});
+			res.end(str);
+		});
+		return; //preventing further movement
+	}
+	
+	next(req, res);
+}
+
+function postLogin(next, req, res) {
+	if((req.method === "POST") && (req.url === "/login")) {
+		//got here means that form shit parsed
+		const data = req.body.user;
+		User.authenticate(data.name, data.pass, (err, user) => {
+			if(err)
+				return console.error(err);
+			
+			if(user) {
+				req.session.uid = user.id;
+				res.writeHead(301, {"Location" : "/"});
+				res.end();
+			} else {
+				const errorMsg = "Invalid Username/Password";
+				addMsg(req, errorMsg, "error");
+				//taking back
+				const backURL = req.headers.referrer || "/login";
+				res.writeHead(301, {"Location" : backURL});
+				res.end();
+			}
+		});
+	} else {
+		next(req, res);
+	}
+}
+
+function getLogout(next, req, res) {
+	if((req.method === "GET") && (req.url === "/logout")) {
+		//expiring session cookie first
+		res.setHeader("Set-Cookie", ["sessid=; expires=Thu, 01 Jan 1970 00:00:00 GMT;"]);
+		sessMap.delete(req.cookie.sessid);
+		res.writeHead(301, {"Location": "/"});
+		res.end();
+	} else {
+		next(req, res);
+	}
+}
 
 //the callback for get post requests... express style
 function getPost(next, req, res) {
 	if((req.method === "GET") && (req.url === "/post")) {
+		//user details for hbs template
+		const user = (req.user) ? req.user : null;
+		
 		//reading the handlebars file
-		includeAndCompile(__dirname + "/view/post.hbs", {"title": "Posts"}).then(str => {
+		includeAndCompile(__dirname + "/view/post.hbs", {"title": "Posts", user}).then(str => {
 			res.writeHead(200, {"Content-Type": "text/html"});
 			res.end(str);
 		});
@@ -201,7 +324,10 @@ function prePostVal(next, req, res) {
 function postPost(next, req, res) {
 	if((req.method === "POST") && (req.url === "/post")) {
 		const {title, body} = req.body.entry; //finna be parsed by formDataParser
-		const entry = new Entry({title, body});
+		//user details for hbs template
+		const user = (req.user) ? req.user : null;
+		const username = user.name;
+		const entry = new Entry({title, body, username});
 		entry.save((err, result) => {
 			if(err) {
 				console.log("Error in saving entry");
@@ -227,10 +353,13 @@ function getHome(next, req, res) { /*the home page is a list of entries*/
 				return;
 			}
 			
-			
+			//user details for hbs template
+			const user = (req.user) ? req.user : null;
+		
 			const hbsObj = {
 				"title": "Entries",
-				"entries": result
+				"entries": result,
+				user
 			};
 			//reading the handlebars file
 			includeAndCompile(__dirname + "/view/entries.hbs", hbsObj).then(str => {
@@ -245,29 +374,6 @@ function getHome(next, req, res) { /*the home page is a list of entries*/
 	next(req, res);
 }
 
-//the callback for get registration page requests... express style
-function getRegister(next, req, res) {
-	if((req.method === "GET") && (req.url === "/register")) {
-		//reading the handlebars file
-		includeAndCompile(__dirname + "/view/register.hbs", {"title": "Register", ...req.session}).then(str => {
-			res.writeHead(200, {"Content-Type": "text/html"});
-			res.end(str);
-		});
-		return; //preventing further movement
-	}
-	
-	next(req, res);
-}
-
-//for handling registration submissions
-function postRegister(next, req, res) {
-	if((req.method === "POST") && (req.url === "/register")) {
-		//got here means form data finna been parsed so...
-		const {user} = req.body;
-		
-	}
-}
-
 
 //the Server
 const app = new Server((req, res) => {
@@ -278,9 +384,14 @@ const app = new Server((req, res) => {
 	Seq.use(staticServe);
 	Seq.use(cookiesParser);
 	Seq.use(sessionHandler);
+	Seq.use(userLoader);
 	Seq.use(JSONparser);
 	Seq.use(formDataParser);
 	Seq.use(getRegister);
+	Seq.use(postRegister);
+	Seq.use(getLogin);
+	Seq.use(postLogin);
+	Seq.use(getLogout);
 	Seq.use(getPost);
 	Seq.use(prePostVal);
 	Seq.use(postPost);

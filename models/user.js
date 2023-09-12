@@ -146,11 +146,10 @@ const UserModelPromise = new Promise((res, rej) => {
 Seq.use(/*the class*/ (next) => {
 	UserModelResolve(class TheClass{
 		#store;
-		static connRef;
+		static connRef = conn;
 		
 		constructor(obj) {
 			this.#store = {};
-			TheClass.connRef = conn;
 			
 			if(obj)
 				for(let key of Object.keys(obj))
@@ -238,7 +237,7 @@ Seq.use(/*the class*/ (next) => {
 				if(row)
 					TheClass.getUser(row["user_id"], cb);
 				else
-					cb(null, -1); //minus one
+					cb(null, -1); //minus one... that day I ain't got no motivation
 			});
 		}
 		
