@@ -2,31 +2,57 @@
 const Sequencer = require(__dirname + "/my_modules/Sequencer.js");
 const {Server} = require("http");
 const {readFile} = require("fs");
-const includeAndCompile = require(__dirname + "/my_modules/doIncludeAndCompile.js");
+const {includeAndCompile, registerHelper} = require(__dirname + "/my_modules/doIncludeAndCompile.js");
 //this is a func that will do all the necessary file inclusions and then, compile, returning me a handlebars string to render
 const qs = require("qs");
-let Entry; /*the model... will be instantiated soon*/
+const uuid = require(__dirname + "/my_modules/copiedUUID.js");
+const parseCookies/*yea, that BT module*/ = require(__dirname + "/my_modules/parseCookies");
+let Entry, User; /*the models... will be instantiated soon*/
 
 //----consts next
 const PORT = process.env.PORT || 8000;
 const STATIC_DIR /*for static files*/ = __dirname + "/public";
 
 //had to put this import in a seq... so that I'll know that for rest of app to work, it must've been imported
-function importModel(next, req, res) {
+//so it is the first thing goin to be on middleware chain
+function importUserModel(next, req, res) {
 	/*after first require, it will be cached, so no need to worry bout requiring on every request*/
-	require("./models/entry.js").then(theClass => {
-		Entry = theClass;
+	require(__dirname + "/models/user.js").then(theClass => {
+		User = theClass;
 		
-		next(req, res, STATIC_DIR /*because next is static server*/);
+		next(req, res);
 	}).catch(err => {
 		console.error(err);
 	});
 }
 
+function importEntryModel(next, req, res) {
+	/*after first require, it will be cached, so no need to worry bout requiring on every request*/
+	require(__dirname + "/models/entry.js").then(theClass => {
+		Entry = theClass;
+		
+		next(req, res);
+	}).catch(err => {
+		console.error(err);
+	});
+}
+
+//------- helpers
+
+//this one is for adding messages to that session var
+function addMsg(req, msg, type) {
+	type = type || "info";
+	//ref next... hopefully, session middleware done did its duty
+	const sess = req.session;
+	sess.messages = sess.messages || [];
+	sess.messages.push({type, string: msg});
+}
+
+
 //--------middleware next
 
 //static file middleware
-function staticServe(next, req, res, viewsDir) {
+function staticServe(next, req, res) {
 	//allowed mimeTypes
 	const allowedMIME = new Map();
 	allowedMIME.set("html", "text/html");
@@ -39,7 +65,7 @@ function staticServe(next, req, res, viewsDir) {
 	const regex = new RegExp(regexStr, 'i');
 	let match;
 	if(/*next shi finna confuse someone one day*/(match = req.url.match(regex)) && (req.method === "GET")) {
-		readFile(`${viewsDir}/${match[0]}`, (err, content) => {
+		readFile(`${STATIC_DIR}/${match[0]}`, (err, content) => {
 			if(err) {
 				res.writeHead(404, {"Content-Type": "text/plain"});
 				res.end(`Error in getting file ${match[0]}`);
@@ -53,6 +79,48 @@ function staticServe(next, req, res, viewsDir) {
 		next(req, res);
 	}
 }
+
+//cookie middleware
+function cookiesParser(next, req, res) {
+	req.cookie = (req.headers.cookie) ? parseCookies(req.headers.cookie) : {};
+	
+	next(req, res);
+}
+
+//session data middleware
+//before that, a map for storing session data
+const sessMap = new Map();
+function sessionHandler(next, req, res) {
+	
+	let sessid;
+	
+	if((!req.cookie.sessid) || (!sessMap.has(req.cookie.sessid))) {
+		//second cobdition is for cases when I shut down my server but cookies still with user
+		//so when I reconnect, they still with it
+		//this user dont have id
+		sessid = uuid();
+		sessMap.set(sessid, {});
+		//making it to expire in 15m for refreshing
+		const exprMilliSecs = (new Date()).getTime() + (1000 * 60 * 15);
+		const exprDate = new Date(exprMilliSecs);
+		res.setHeader("Set-Cookie", [`sessid=${sessid};expires=${exprDate.toUTCString()}`]);
+	} else {
+		sessid = req.cookie.sessid;
+	}
+	
+	//got here means it has sessid
+	req.session = sessMap.get(sessid);
+	
+	
+	//also gon' be registering a handlebars helper here so it can have access to req
+	//it goes with the func for adding session messages, but I had to put it here
+	registerHelper("clearMsgs", (options) => {
+		req.session.messages = [];
+	});
+	
+	next(req, res);
+}
+
 //JSON parser middleware
 function JSONparser(next, req, res) {
 	//only attach handler if content type is JSON
@@ -177,13 +245,42 @@ function getHome(next, req, res) { /*the home page is a list of entries*/
 	next(req, res);
 }
 
+//the callback for get registration page requests... express style
+function getRegister(next, req, res) {
+	if((req.method === "GET") && (req.url === "/register")) {
+		//reading the handlebars file
+		includeAndCompile(__dirname + "/view/register.hbs", {"title": "Register", ...req.session}).then(str => {
+			res.writeHead(200, {"Content-Type": "text/html"});
+			res.end(str);
+		});
+		return; //preventing further movement
+	}
+	
+	next(req, res);
+}
+
+//for handling registration submissions
+function postRegister(next, req, res) {
+	if((req.method === "POST") && (req.url === "/register")) {
+		//got here means form data finna been parsed so...
+		const {user} = req.body;
+		
+	}
+}
+
+
 //the Server
 const app = new Server((req, res) => {
+	
 	const Seq = new Sequencer();
-	Seq.use(importModel); //also trusting on npm caching so that I don't have to require it again on subsequent requests
+	Seq.use(importUserModel);
+	Seq.use(importEntryModel); //also trusting on npm caching so that I don't have to require it again on subsequent requests
 	Seq.use(staticServe);
+	Seq.use(cookiesParser);
+	Seq.use(sessionHandler);
 	Seq.use(JSONparser);
 	Seq.use(formDataParser);
+	Seq.use(getRegister);
 	Seq.use(getPost);
 	Seq.use(prePostVal);
 	Seq.use(postPost);
@@ -195,6 +292,8 @@ const app = new Server((req, res) => {
 
 app.listen(PORT, () => console.log("Idan is active"));
 app.on("close", () => {
+	console.log("closing server");
 	Entry.endAll();
+	Entry.pool.end();
 });
 app.on("SIGNINT", () => app.close());

@@ -77,6 +77,10 @@ Seq.use(/*create class only after table creation success*/(next) => {
 			TheClass.connRef.query(`INSERT INTO entries(entry) VALUES ($1)`, [toPut], (err, res) => cb(err, res));
 		}
 		
+		get pool() {
+			return pool;
+		}
+		
 		static getRange(from, to, cb) {
 			const entries = [];
 			const newToProm /*new "to" value*/ = new Promise((resolve, reject) => {

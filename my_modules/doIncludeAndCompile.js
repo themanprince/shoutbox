@@ -2,6 +2,11 @@ const doInclude = require(__dirname + "/includer.js");
 const handlebars = require("handlebars");
 const {readFile} = (require("fs")).promises;
 
+//register helper function
+function registerHelper(helperName, helperFunc) {
+	/*hoping same closure for all who import this*/
+	handlebars.registerHelper(helperName, helperFunc);
+}
 
 async function includeAndCompile(fileName, obj) {
 	let hbCompiled;
@@ -18,4 +23,5 @@ async function includeAndCompile(fileName, obj) {
 }
 
 //exporting
-module.exports = includeAndCompile;
+module.exports.includeAndCompile = includeAndCompile;
+module.exports.registerHelper = registerHelper;

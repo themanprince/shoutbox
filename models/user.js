@@ -1,3 +1,5 @@
+/*NOTE: I use return statements in lotta functions not to actually return but to make function exec stop... e.g. return console.error()*/
+
 //gon have to implement a postgres db model
 //mans used Redis... so I'mma also go volatile with rolled-back transactions
 const pool = require(__dirname + "/poolObj.js");
@@ -26,7 +28,6 @@ function runQuery(next, queryStr) {
 			return;
 		}
 		
-		console.log(res);
 		next();
 	});
 }
@@ -205,12 +206,70 @@ Seq.use(/*the class*/ (next) => {
 		}
 		
 		hashPassword = (cb) => {
-			cb();
+			bcryptjs.genSalt(12, (err, salt) => {
+				if(err)
+					return console.error(err);
+				//return is to stop function continued running
+				
+				this.#store.salt = salt;
+				 bcryptjs.hash(this.#store.pass, salt, (err, hash) => {
+					if(err)
+						return console.error(err);
+					
+					this.#store.pass = hash;
+					cb();
+    			});
+			});
 		}
 		
 		update = (cb) => {
 			const {id, name} = this.#store;
 			TheClass.connRef.query("CALL update($1, $2, $3);", [id, name, JSON.stringify(this.#store)], cb);
+		}
+		
+		/*for getting a user by their name... dont get why its static tho... altho, it passes a new user object
+		to the cb, so maybe its not instance method because it can't belong to any instance... sad period*/
+		static getByName(name, cb) {
+			TheClass.getId(name, (err, result) => {
+				if(err)
+					return console.error(err);
+				
+				let row = result.rows[0];
+				if(row)
+					TheClass.getUser(row["user_id"], cb);
+				else
+					cb(null, -1); //minus one
+			});
+		}
+		
+		static getId(name, cb) {
+			TheClass.connRef.query("SELECT user_id FROM user_details WHERE user_name = $1", [name], cb);
+		}
+		
+		static getUser(id, cb) {
+			TheClass.connRef.query("SELECT kini FROM user_details WHERE user_id = $1", [id], (err, result) => {
+				if(err)
+					return cb(err);
+				
+				cb(null, result.rows[0].kini);
+			});
+		}
+		
+		static authenticate(name, pass, cb) {
+			TheClass.getByName(name, (nameErr, user) => {
+				if(nameErr) return cb(err);
+				
+				if(user === -1)	return cb();
+				
+				
+				bcryptjs.hash(pass, user.salt, (hashErr, hash) => {
+					if(hashErr)	return cb(hashErr);
+					
+					if(hash === user.pass)	return cb(null, user);
+					
+					cb();
+				});
+			});
 		}
 				
 		static endAll() { /*added this one myself for closing connections and rolling back*/
@@ -227,44 +286,6 @@ Seq.use(/*the class*/ (next) => {
 	});
 		
 	next(); //after creating class
-});
-
-
-/*-----------testing*/
-let x;
-Seq.use(next => {
-	UserModelPromise.then(kini => {
-		(x = new kini({"name": "Menor", "pussy":"dry"})).save((err, res) => {
-			conn.query(`SELECT * FROM user_details;`, (selErr, selRes) => {
-				console.log(selErr, selRes.rows, "\n");
-				next();
-			});
-		});
-	});
-});
-
-Seq.use(next => {
-	UserModelPromise.then(kini => {
-		x.store.name = "Matthew";
-		x.save((err, res) => {
-			conn.query(`SELECT * FROM user_details;`, (selErr, selRes) => {
-				console.log(selErr, selRes.rows, "\n");
-				next();
-			});
-		});
-	});
-});
-
-Seq.use(next => {
-	UserModelPromise.then(kini => {
-		(new kini({"name": "Menorahh", "pussy":"wet"})).save((err, res) => {
-			conn.query(`SELECT * FROM user_details;`, (selErr, selRes) => {
-				console.log(selErr, selRes.rows, "\n");
-				next();
-			});
-		});
-	});
-	next();
 });
 
 
