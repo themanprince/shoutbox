@@ -81,6 +81,15 @@ Seq.use(/*create class only after table creation success*/(next) => {
 			return pool;
 		}
 		
+		static count(cb) {
+			TheClass.connRef.query(`SELECT count(*) FROM entries;`, (err, res) => {
+				if(err)
+					return cb(err);
+				
+				cb(null, parseInt(res.rows[0]["count"]));
+			});
+		}
+		
 		static getRange(from, to, cb) {
 			const entries = [];
 			const newToProm /*new "to" value*/ = new Promise((resolve, reject) => {

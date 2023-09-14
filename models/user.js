@@ -226,6 +226,7 @@ Seq.use(/*the class*/ (next) => {
 			TheClass.connRef.query("CALL update($1, $2, $3);", [id, name, JSON.stringify(this.#store)], cb);
 		}
 		
+		
 		/*for getting a user by their name... dont get why its static tho... altho, it passes a new user object
 		to the cb, so maybe its not instance method because it can't belong to any instance... sad period*/
 		static getByName(name, cb) {
@@ -250,6 +251,16 @@ Seq.use(/*the class*/ (next) => {
 				if(err)
 					return cb(err);
 				
+				if(result.rows.length === 0)
+					return cb(null, {});
+				
+					/*you can imagine my reaction on learning about this method I'm about to do next... my whole dev life has been a lie*/
+					result.rows[0].kini.toJSON = function () {
+						return {
+							id: this.id,
+							name: this.name
+						};
+					}
 				cb(null, result.rows[0].kini);
 			});
 		}

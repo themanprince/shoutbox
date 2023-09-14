@@ -8,5 +8,12 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Me, the_man_prvnce",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "basic-auth": "^2.0.1",
+    "bcryptjs": "^2.4.3",
+    "handlebars": "^4.7.8",
+    "pg": "^8.11.3",
+    "qs": "^6.11.2"
+  }
 }

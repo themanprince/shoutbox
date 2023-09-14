@@ -7,6 +7,7 @@ const {includeAndCompile, registerHelper} = require(__dirname + "/my_modules/doI
 const qs = require("qs");
 const uuid = require(__dirname + "/my_modules/copiedUUID.js");
 const parseCookies/*yea, that BT module*/ = require(__dirname + "/my_modules/parseCookies");
+const auth = require("basic-auth");
 let Entry, User; /*the models... will be instantiated soon*/
 
 //----consts next
@@ -60,7 +61,7 @@ function staticServe(next, req, res) {
 	allowedMIME.set("js", "application/js");
 	allowedMIME.set("woff2", "font/woff2");
 	allowedMIME.set("svg", "image/svg+xml");
-	allowedMIME.set("ico", "image/icon"); /*this particular one could be rubbish, but kiwi browser won't lemme be without constantly asking for favicon.ico*/
+	allowedMIME.set("ico", "image/x-icon"); /*this particular one could be rubbish, but kiwi browser won't lemme be without constantly asking for favicon.ico*/
 	
 	const regexStr = `\\/.+\\.(${[...allowedMIME.keys()].join("|")})$`;
 	const regex = new RegExp(regexStr, 'i');
@@ -120,6 +121,29 @@ function sessionHandler(next, req, res) {
 	});
 	
 	next(req, res);
+}
+
+//general api authentication middleware
+function authAPI(next, req, res) {
+	if((req.url.startsWith("/api"))) {
+		let authObj;
+		if(authObj = auth(req)){
+			const {name, pass} = authObj;
+			User.authenticate(name, pass, (err, user) => {
+				if(err)
+					return console.error(err);
+				
+				if(user) {
+					req.remoteUser = user;
+					next(req, res); //only if user authenticated
+				} else
+					console.error("Unable to authenticate user");
+			});
+		} else {
+			console.error("User tried to access /api without an Authorization header or so... \nSupposed to send 401:unauthorized for user-agent to query em for me... but fuck it");
+		}
+	} else
+		next(req, res);
 }
 
 //user loader middleware
@@ -337,6 +361,7 @@ function postPost(next, req, res) {
 			
 			res.writeHead(301, {"Location": "/"}); //TODO - this route
 			res.end();
+		
 		});
 		
 		return; //dont go further down
@@ -374,8 +399,99 @@ function getHome(next, req, res) { /*the home page is a list of entries*/
 	next(req, res);
 }
 
+//----api middleware
+function apiGetUser(next, req, res) {
+	let match;
+	if((req.method === "GET") && (match = /\/api\/user\/(.+)/.exec(req.url))) {
+		const [_, id] = match;
+		User.getUser(id, (err, user) => {
+			if(err)
+				return console.error(err);
+			
+			if(!user.id) {
+				res.writeHead(404);
+				res.end("Not found");
+				return;
+			}
+			
+			res.writeHead(200, {"Content-Type": "application/json"});
+			res.end(JSON.stringify(user));
+		});
+	} else
+		next(req, res);
+}
 
-//the Server
+function apiPostPost(next, req, res) {
+	//make sure header content-type is x-www-form-urlencoded
+	if((req.method === "POST") && (req.url === "/api/entry")) {
+		const {title, body} = req.body.entry; //finna be parsed by formDataParser
+		//user details
+		const user = (req.remoteUser) ? req.remoteUser : null;
+		const username = user.name;
+		const entry = new Entry({title, body, username});
+		entry.save((err, result) => {
+			if(err) {
+				console.log("Error in saving entry");
+				console.error(err);
+				return; //there was something below to not go to before... in the begi...
+			}
+			
+			res.writeHead(200, {"Content-Type": "application/json"}); //TODO - this route
+			res.end(JSON.stringify({"message": "Entry Added"}));
+		
+		});
+		
+		return; //dont go further down
+	}
+	
+	next(req, res);
+}
+
+//function for populating the req with page details when user request for a page of entries
+function apiPreGetPage(perPage) {
+	perPage = perPage || 10;
+	return function(next, req, res) {
+		let match;
+		if((req.method === "GET") && (match = /\/api\/entries(\/(.+))?/.exec(req.url))) {
+			const [ , , pg] = match;
+			const page = Math.max(1, parseInt(pg || '1')) - 1;
+			//apparently, the math.max shit above makes sure it's never zero... for the case of users on loud
+			
+			Entry.count((err, total) => {
+				if(err)
+					return console.log(err);
+				
+				req.page = {
+					"number": page,
+					perPage,
+					"from": page * perPage,
+					"to": (page * perPage) + (perPage - 1),
+					total,
+					count: Math.ceil(total/perPage)
+				};
+				
+				
+				next(req, res);
+			});
+		}
+	}
+}
+
+function apiGetPage(next, req, res) {
+	if((req.method === "GET") && (req.url.match(/\/api\/entries(\/(.+))?/))) {
+		//got here means it passed the pre..
+		const {from, to} = req.page;
+		Entry.getRange(from, to, (err, entries) => {
+			if(err)
+				return console.error(err);
+			
+			res.writeHead(200, {"Content-Type": "application/json"});
+			res.end(JSON.stringify(entries));
+		});
+	}	
+}
+
+//-----------the Server
 const app = new Server((req, res) => {
 	
 	const Seq = new Sequencer();
@@ -384,6 +500,7 @@ const app = new Server((req, res) => {
 	Seq.use(staticServe);
 	Seq.use(cookiesParser);
 	Seq.use(sessionHandler);
+	Seq.use(authAPI);
 	Seq.use(userLoader);
 	Seq.use(JSONparser);
 	Seq.use(formDataParser);
@@ -396,6 +513,10 @@ const app = new Server((req, res) => {
 	Seq.use(prePostVal);
 	Seq.use(postPost);
 	Seq.use(getHome);
+	Seq.use(apiGetUser);
+	Seq.use(apiPostPost);
+	Seq.use(apiPreGetPage());
+	Seq.use(apiGetPage);
 	
 	Seq.next(req, res);
 	//starting with static serve so I gotta lass it the dir
