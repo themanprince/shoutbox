@@ -484,9 +484,18 @@ function apiGetPage(next, req, res) {
 		Entry.getRange(from, to, (err, entries) => {
 			if(err)
 				return console.error(err);
-			
-			res.writeHead(200, {"Content-Type": "application/json"});
-			res.end(JSON.stringify(entries));
+		
+			if(req.headers["accept"].match(/application\/xml/)) {
+				const pathToEntriesXML = __dirname + "/view/entriesXML.hbs";
+				includeAndCompile(pathToEntriesXML, entries).then(xml => {
+					res.writeHead(200, {"Content-Type": "application/xml"});
+					res.end(xml);
+				});
+			} else /*default is json, don't care what they asked for*/
+			{
+				res.writeHead(200, {"Content-Type": "application/json"});
+				res.end(JSON.stringify(entries));
+			}
 		});
 	}	
 }
